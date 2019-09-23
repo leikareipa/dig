@@ -8,8 +8,8 @@
  * https://trwiki.earvillage.net/doku.php?id=trs:file_formats.
  * 
  * Note that this project is a simple tool to scratch a personal itch. For
- * purposes of modding and the like, there exist various other more relevant
- * solutions.
+ * purposes of modding and the like, there surely exist various other more
+ * relevant solutions.
  *
  */
 
@@ -59,13 +59,13 @@ struct tr_triangle_s
     int textureIdx;
 };
 
-struct tr_room_s
+struct tr_room_mesh_s
 {
-    unsigned numRoomMeshQuads;
-    struct tr_quad_s *roomQuadMesh;
+    unsigned numQuads;
+    struct tr_quad_s *quads;
 
-    unsigned numRoomMeshTriangles;
-    struct tr_triangle_s *roomTriangleMesh;
+    unsigned numTriangles;
+    struct tr_triangle_s *triangles;
 };
 
 struct tr_texture_atlas_s
@@ -85,8 +85,8 @@ struct imported_data_s
     unsigned numTextureAtlases;
     struct tr_texture_atlas_s *textureAtlases;
 
-    unsigned numRooms;
-    struct tr_room_s *rooms;
+    unsigned numRoomMeshes;
+    struct tr_room_mesh_s *roomMeshes;
 };
 
 static FILE *INPUT_FILE;
@@ -164,12 +164,12 @@ void import(void)
 
     /* Read rooms.*/
     {
-        IMPORTED_DATA.numRooms = (uint16_t)read_value(2);
-        print_file_pos(-2);printf(" Rooms: %d\n", IMPORTED_DATA.numRooms);
+        IMPORTED_DATA.numRoomMeshes = (uint16_t)read_value(2);
+        print_file_pos(-2);printf(" Rooms: %d\n", IMPORTED_DATA.numRoomMeshes);
 
-        IMPORTED_DATA.rooms = malloc(sizeof(struct tr_room_s) * IMPORTED_DATA.numRooms);
+        IMPORTED_DATA.roomMeshes = malloc(sizeof(struct tr_room_mesh_s) * IMPORTED_DATA.numRoomMeshes);
 
-        for (i = 0; i < IMPORTED_DATA.numRooms; i++)
+        for (i = 0; i < IMPORTED_DATA.numRoomMeshes; i++)
         {
             unsigned numRoomDataWords = 0;
             unsigned numPortals = 0;
@@ -219,34 +219,34 @@ void import(void)
 
                     /* Quads.*/
                     {
-                        IMPORTED_DATA.rooms[i].numRoomMeshQuads = *roomDataIterator++;
-                        print_file_pos(0);printf("       Quads: %d\n", IMPORTED_DATA.rooms[i].numRoomMeshQuads);
+                        IMPORTED_DATA.roomMeshes[i].numQuads = *roomDataIterator++;
+                        print_file_pos(0);printf("       Quads: %d\n", IMPORTED_DATA.roomMeshes[i].numQuads);
 
-                        IMPORTED_DATA.rooms[i].roomQuadMesh = malloc(sizeof(struct tr_quad_s) * IMPORTED_DATA.rooms[i].numRoomMeshQuads);
+                        IMPORTED_DATA.roomMeshes[i].quads = malloc(sizeof(struct tr_quad_s) * IMPORTED_DATA.roomMeshes[i].numQuads);
 
-                        for (p = 0; p < IMPORTED_DATA.rooms[i].numRoomMeshQuads; p++)
+                        for (p = 0; p < IMPORTED_DATA.roomMeshes[i].numQuads; p++)
                         {
-                            IMPORTED_DATA.rooms[i].roomQuadMesh[p].vertex[0] = vertexList[*roomDataIterator++];
-                            IMPORTED_DATA.rooms[i].roomQuadMesh[p].vertex[1] = vertexList[*roomDataIterator++];
-                            IMPORTED_DATA.rooms[i].roomQuadMesh[p].vertex[2] = vertexList[*roomDataIterator++];
-                            IMPORTED_DATA.rooms[i].roomQuadMesh[p].vertex[3] = vertexList[*roomDataIterator++];
-                            IMPORTED_DATA.rooms[i].roomQuadMesh[p].textureIdx = *roomDataIterator++;
+                            IMPORTED_DATA.roomMeshes[i].quads[p].vertex[0] = vertexList[*roomDataIterator++];
+                            IMPORTED_DATA.roomMeshes[i].quads[p].vertex[1] = vertexList[*roomDataIterator++];
+                            IMPORTED_DATA.roomMeshes[i].quads[p].vertex[2] = vertexList[*roomDataIterator++];
+                            IMPORTED_DATA.roomMeshes[i].quads[p].vertex[3] = vertexList[*roomDataIterator++];
+                            IMPORTED_DATA.roomMeshes[i].quads[p].textureIdx = *roomDataIterator++;
                         }
                     }
 
                     /* Triangles.*/
                     {
-                        IMPORTED_DATA.rooms[i].numRoomMeshTriangles = *roomDataIterator++;
-                        print_file_pos(0);printf("       Triangles: %d\n", IMPORTED_DATA.rooms[i].numRoomMeshTriangles);
+                        IMPORTED_DATA.roomMeshes[i].numTriangles = *roomDataIterator++;
+                        print_file_pos(0);printf("       Triangles: %d\n", IMPORTED_DATA.roomMeshes[i].numTriangles);
 
-                        IMPORTED_DATA.rooms[i].roomTriangleMesh = malloc(sizeof(struct tr_triangle_s) * IMPORTED_DATA.rooms[i].numRoomMeshTriangles);
+                        IMPORTED_DATA.roomMeshes[i].triangles = malloc(sizeof(struct tr_triangle_s) * IMPORTED_DATA.roomMeshes[i].numTriangles);
 
-                        for (p = 0; p < IMPORTED_DATA.rooms[i].numRoomMeshTriangles; p++)
+                        for (p = 0; p < IMPORTED_DATA.roomMeshes[i].numTriangles; p++)
                         {
-                            IMPORTED_DATA.rooms[i].roomTriangleMesh[p].vertex[0] = vertexList[*roomDataIterator++];
-                            IMPORTED_DATA.rooms[i].roomTriangleMesh[p].vertex[1] = vertexList[*roomDataIterator++];
-                            IMPORTED_DATA.rooms[i].roomTriangleMesh[p].vertex[2] = vertexList[*roomDataIterator++];
-                            IMPORTED_DATA.rooms[i].roomTriangleMesh[p].textureIdx = *roomDataIterator++;
+                            IMPORTED_DATA.roomMeshes[i].triangles[p].vertex[0] = vertexList[*roomDataIterator++];
+                            IMPORTED_DATA.roomMeshes[i].triangles[p].vertex[1] = vertexList[*roomDataIterator++];
+                            IMPORTED_DATA.roomMeshes[i].triangles[p].vertex[2] = vertexList[*roomDataIterator++];
+                            IMPORTED_DATA.roomMeshes[i].triangles[p].textureIdx = *roomDataIterator++;
                         }
                     }
                 }
@@ -500,7 +500,7 @@ void export(void)
 
     /* Save the room mesh.*/
     {
-        for (i = 0; i < IMPORTED_DATA.numRooms; i++)
+        for (i = 0; i < IMPORTED_DATA.numRoomMeshes; i++)
         {
             FILE *outFile;
             char tmp[256];
@@ -512,7 +512,7 @@ void export(void)
             assert(outFile && "Failed to open a file to save a mesh into.");
 
             /* Save the quads.*/
-            for (p = 0; p < IMPORTED_DATA.rooms[i].numRoomMeshQuads; p++)
+            for (p = 0; p < IMPORTED_DATA.roomMeshes[i].numQuads; p++)
             {
                 int v = 0;
 
@@ -521,9 +521,9 @@ void export(void)
 
                 for (v = 0; v < 4; v++)
                 {
-                    sprintf(tmp, " %d %d %d", IMPORTED_DATA.rooms[i].roomQuadMesh[p].vertex[v].x,
-                                              IMPORTED_DATA.rooms[i].roomQuadMesh[p].vertex[v].y,
-                                              IMPORTED_DATA.rooms[i].roomQuadMesh[p].vertex[v].z);
+                    sprintf(tmp, " %d %d %d", IMPORTED_DATA.roomMeshes[i].quads[p].vertex[v].x,
+                                              IMPORTED_DATA.roomMeshes[i].quads[p].vertex[v].y,
+                                              IMPORTED_DATA.roomMeshes[i].quads[p].vertex[v].z);
 
                     fputs(tmp, outFile);
                 }
@@ -532,7 +532,7 @@ void export(void)
             }
 
             /* Save the triangles.*/
-            for (p = 0; p < IMPORTED_DATA.rooms[i].numRoomMeshTriangles; p++)
+            for (p = 0; p < IMPORTED_DATA.roomMeshes[i].numTriangles; p++)
             {
                 int v = 0;
 
@@ -541,9 +541,9 @@ void export(void)
 
                 for (v = 0; v < 3; v++)
                 {
-                    sprintf(tmp, " %d %d %d", IMPORTED_DATA.rooms[i].roomTriangleMesh[p].vertex[v].x,
-                                              IMPORTED_DATA.rooms[i].roomTriangleMesh[p].vertex[v].y,
-                                              IMPORTED_DATA.rooms[i].roomTriangleMesh[p].vertex[v].z);
+                    sprintf(tmp, " %d %d %d", IMPORTED_DATA.roomMeshes[i].triangles[p].vertex[v].x,
+                                              IMPORTED_DATA.roomMeshes[i].triangles[p].vertex[v].y,
+                                              IMPORTED_DATA.roomMeshes[i].triangles[p].vertex[v].z);
 
                     fputs(tmp, outFile);
                 }
