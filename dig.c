@@ -504,17 +504,13 @@ void export(void)
         {
             FILE *outFile;
             char tmp[256];
-            char meshFileName[128];
+            char meshFileName[256];
 
             sprintf(meshFileName, "output/mesh/room/%d.trm", i);
 
             outFile = fopen(meshFileName, "wb");
             assert(outFile && "Failed to open a file to save a mesh into.");
 
-            /* Save the total count of faces in this mesh.*/
-            sprintf(tmp, "%d\n", (IMPORTED_DATA.rooms[i].numRoomMeshQuads + IMPORTED_DATA.rooms[i].numRoomMeshTriangles));
-            fputs(tmp, outFile);
-            
             /* Save the quads.*/
             for (p = 0; p < IMPORTED_DATA.rooms[i].numRoomMeshQuads; p++)
             {

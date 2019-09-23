@@ -9,9 +9,7 @@
  * 
  */
 
-$meshFile = explode("\n", file_get_contents("bin/output/mesh/room/1.trm"));
-$numFaces = $meshFile[0];
-$faceData = array_slice($meshFile, 1);
+$faceData = explode("\n", file_get_contents("bin/output/mesh/room/1.trm"));
 
 $outFile = fopen("bin/output/test.stl", "w");
 if (!$outFile)
