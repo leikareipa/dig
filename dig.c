@@ -1,3 +1,18 @@
+/*
+ * 2019 Tarpeeksi Hyvae Soft
+ * dig
+ * 
+ * Provides (partial) access to Tomb Raider 1's .PHD level files.
+ * 
+ * Based on the third-party file format documentation available at
+ * https://trwiki.earvillage.net/doku.php?id=trs:file_formats.
+ * 
+ * Note that this project is a simple tool to scratch a personal itch. For
+ * purposes of modding and the like, there exist various other more relevant
+ * solutions.
+ *
+ */
+
 #include <stdint.h>
 #include <stdlib.h>
 #include <assert.h>
@@ -6,9 +21,9 @@
 /* Placeholder byte sizes of various Tomb Raider data structs.*/
 #define SIZE_TR_ROOM_STATIC_MESH 18
 #define SIZE_TR_CINEMATIC_FRAME 16
+#define SIZE_TR_SPRITE_SEQUENCE 8
 #define SIZE_TR_OBJECT_TEXTURE 20
 #define SIZE_TR_SPRITE_TEXTURE 16
-#define SIZE_TR_SPRITE_SEQUENCE 8
 #define SIZE_TR_MESH_TREE_NODE 4
 #define SIZE_TR_ANIM_DISPATCH 8
 #define SIZE_TR_ANIM_COMMANDS 2
@@ -43,7 +58,7 @@ struct phd_file_contents_s
 };
 
 static FILE *INPUT_FILE;
-static struct phd_file_contents_s IMPORTED;
+static struct phd_file_contents_s IMPORTED_DATA;
 
 int32_t read_value(const unsigned numBytes)
 {
@@ -89,26 +104,26 @@ void import(void)
 {
     int i = 0;
 
-    IMPORTED.fileVersion = (uint32_t)read_value(4);
+    IMPORTED_DATA.fileVersion = (uint32_t)read_value(4);
 
-    assert((IMPORTED.fileVersion == 32) && "Unsupported file format.");
+    assert((IMPORTED_DATA.fileVersion == 32) && "Unsupported file format.");
 
     /* Read textures.*/
     {
-        IMPORTED.numTextures = (uint32_t)read_value(4);
+        IMPORTED_DATA.numTextures = (uint32_t)read_value(4);
 
-        IMPORTED.textureAtlases = malloc(sizeof(struct tr_texture_atlas_s));
+        IMPORTED_DATA.textureAtlases = malloc(sizeof(struct tr_texture_atlas_s));
 
-        for (i = 0; i < IMPORTED.numTextures; i++)
+        for (i = 0; i < IMPORTED_DATA.numTextures; i++)
         {
             unsigned numPixels;
 
-            IMPORTED.textureAtlases[i].width = 256;
-            IMPORTED.textureAtlases[i].height = 256;
-            numPixels = (IMPORTED.textureAtlases[i].width * IMPORTED.textureAtlases[i].height);
+            IMPORTED_DATA.textureAtlases[i].width = 256;
+            IMPORTED_DATA.textureAtlases[i].height = 256;
+            numPixels = (IMPORTED_DATA.textureAtlases[i].width * IMPORTED_DATA.textureAtlases[i].height);
 
-            IMPORTED.textureAtlases[i].pixels = malloc(numPixels);
-            read_bytes((char*)IMPORTED.textureAtlases[i].pixels, numPixels);
+            IMPORTED_DATA.textureAtlases[i].pixels = malloc(numPixels);
+            read_bytes((char*)IMPORTED_DATA.textureAtlases[i].pixels, numPixels);
         }
     }
 
@@ -136,7 +151,7 @@ void import(void)
 
             print_file_pos(0);printf("   #%d\n", i);
 
-            /* Info room info.*/
+            /* Room info.*/
             skip_num_bytes(SIZE_TR_ROOM_INFO);
 
             /* Room data.*/
@@ -325,13 +340,13 @@ void import(void)
 
     /* Read palette.*/
     {
-        IMPORTED.palette = malloc(768);
-        read_bytes((char*)IMPORTED.palette, 768);
+        IMPORTED_DATA.palette = malloc(768);
+        read_bytes((char*)IMPORTED_DATA.palette, 768);
 
         for (i = 0; i < 768; i++)
         {
             /* Convert colors from VGA 6-bit to full 8-bit.*/
-            IMPORTED.palette[i] = (IMPORTED.palette[i] * 4);
+            IMPORTED_DATA.palette[i] = (IMPORTED_DATA.palette[i] * 4);
         }
     }
 
@@ -366,18 +381,18 @@ void export(void)
 
         assert(outFile && "Failed to open a file to save the palette into.");
 
-        fwrite((char*)IMPORTED.palette, 1, 768, outFile);
+        fwrite((char*)IMPORTED_DATA.palette, 1, 768, outFile);
 
         fclose(outFile);
     }
 
     /* Save the texture atlases.*/
     {
-        for (i = 0; i < IMPORTED.numTextures; i++)
+        for (i = 0; i < IMPORTED_DATA.numTextures; i++)
         {
             FILE *outFile;
             char textureName[128];
-            const unsigned numPixels = (IMPORTED.textureAtlases[i].width * IMPORTED.textureAtlases[i].height);
+            const unsigned numPixels = (IMPORTED_DATA.textureAtlases[i].width * IMPORTED_DATA.textureAtlases[i].height);
 
             sprintf(textureName, "output/texture/atlas/%d.trt", i);
 
@@ -385,7 +400,7 @@ void export(void)
 
             assert(outFile && "Failed to open a file to save a texture into.");
 
-            fwrite((char*)IMPORTED.textureAtlases[i].pixels, 1, numPixels, outFile);
+            fwrite((char*)IMPORTED_DATA.textureAtlases[i].pixels, 1, numPixels, outFile);
 
             fclose(outFile);
         }
