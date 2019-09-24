@@ -48,6 +48,11 @@ struct tr_object_texture_s
     unsigned hasAlpha;
     unsigned hasWireframe;
     unsigned ignoresDepthTest;
+
+    /* UV coordinates for each of the texture's four corners.*/
+    float u[4];
+    float v[4];
+
     uint8_t *pixelData;
 };
 
@@ -61,12 +66,14 @@ struct tr_quad_s
 {
     struct tr_vertex_s vertex[4];
     int textureIdx;
+    unsigned isDoubleSided;
 };
 
 struct tr_triangle_s
 {
     struct tr_vertex_s vertex[3];
     int textureIdx;
+    unsigned isDoubleSided;
 };
 
 struct tr_room_mesh_s
@@ -156,8 +163,7 @@ void import(void)
     /* Read textures.*/
     {
         IMPORTED_DATA.numTextureAtlases = (uint32_t)read_value(4);
-
-        IMPORTED_DATA.textureAtlases = malloc(sizeof(struct tr_texture_atlas_s));
+        IMPORTED_DATA.textureAtlases = malloc(sizeof(struct tr_texture_atlas_s) * IMPORTED_DATA.numTextureAtlases);
 
         for (i = 0; i < IMPORTED_DATA.numTextureAtlases; i++)
         {
@@ -244,6 +250,9 @@ void import(void)
                             IMPORTED_DATA.roomMeshes[i].quads[p].vertex[2] = vertexList[*roomDataIterator++];
                             IMPORTED_DATA.roomMeshes[i].quads[p].vertex[3] = vertexList[*roomDataIterator++];
                             IMPORTED_DATA.roomMeshes[i].quads[p].textureIdx = *roomDataIterator++;
+
+                            IMPORTED_DATA.roomMeshes[i].quads[p].isDoubleSided = (IMPORTED_DATA.roomMeshes[i].quads[p].textureIdx & 0x8000);
+                            IMPORTED_DATA.roomMeshes[i].quads[p].textureIdx = (IMPORTED_DATA.roomMeshes[i].quads[p].textureIdx & 0x7fff);
                         }
                     }
 
@@ -260,6 +269,9 @@ void import(void)
                             IMPORTED_DATA.roomMeshes[i].triangles[p].vertex[1] = vertexList[*roomDataIterator++];
                             IMPORTED_DATA.roomMeshes[i].triangles[p].vertex[2] = vertexList[*roomDataIterator++];
                             IMPORTED_DATA.roomMeshes[i].triangles[p].textureIdx = *roomDataIterator++;
+
+                            IMPORTED_DATA.roomMeshes[i].triangles[p].isDoubleSided = (IMPORTED_DATA.roomMeshes[i].triangles[p].textureIdx & 0x8000);
+                            IMPORTED_DATA.roomMeshes[i].triangles[p].textureIdx = (IMPORTED_DATA.roomMeshes[i].triangles[p].textureIdx & 0x7fff);
                         }
                     }
                 }
@@ -397,12 +409,18 @@ void import(void)
             /* Copy the texture's data from the texture atlas.*/
             {
                 unsigned minX = ~0u, maxX = 0, minY = ~0u, maxY = 0;
-                unsigned cornerPoints[4][2] = {0}; /* 4 uv coordinate pairs defining this texture's rectangle in the texture atlas.*/
+                unsigned cornerPoints[4][2] = {0}; /* 4 texel coordinate pairs defining this texture's rectangle in the texture atlas.*/
 
                 for (p = 0; p < 4; p++)
                 {
-                    cornerPoints[p][0] = (unsigned)((uint16_t)read_value(2) / (float)(1 << 8));
-                    cornerPoints[p][1] = (unsigned)((uint16_t)read_value(2) / (float)(1 << 8));
+                    const unsigned x = (uint16_t)read_value(2);
+                    const unsigned y = (uint16_t)read_value(2);
+
+                    cornerPoints[p][0] = (unsigned)((x & 0xff00) / 256.0);
+                    cornerPoints[p][1] = (unsigned)((y & 0xff00) / 256.0);
+
+                    texture->u[3-p] = ((x & 0xff) / 256.0);
+                    texture->v[3-p] = ((y & 0xff) / 256.0);
                 }
 
                 for (p = 0; p < (isTriangle? 3 : 4); p++)
@@ -618,16 +636,19 @@ void export(void)
             for (p = 0; p < IMPORTED_DATA.roomMeshes[i].numQuads; p++)
             {
                 int v = 0;
+                const unsigned textureIdx = IMPORTED_DATA.roomMeshes[i].quads[p].textureIdx;
 
                 /* Four vertices per face.*/
-                sprintf(tmp, "4 %d", IMPORTED_DATA.roomMeshes[i].quads[p].textureIdx);
+                sprintf(tmp, "4 %d", textureIdx);
                 fputs(tmp, outFile);
 
                 for (v = 0; v < 4; v++)
                 {
-                    sprintf(tmp, " %d %d %d", IMPORTED_DATA.roomMeshes[i].quads[p].vertex[v].x,
-                                              IMPORTED_DATA.roomMeshes[i].quads[p].vertex[v].y,
-                                              IMPORTED_DATA.roomMeshes[i].quads[p].vertex[v].z);
+                    sprintf(tmp, " %d %d %d %f %f", IMPORTED_DATA.roomMeshes[i].quads[p].vertex[v].x,
+                                                    IMPORTED_DATA.roomMeshes[i].quads[p].vertex[v].y,
+                                                    IMPORTED_DATA.roomMeshes[i].quads[p].vertex[v].z,
+                                                    IMPORTED_DATA.objectTextures[textureIdx].u[v],
+                                                    IMPORTED_DATA.objectTextures[textureIdx].v[v]);
 
                     fputs(tmp, outFile);
                 }
@@ -639,16 +660,19 @@ void export(void)
             for (p = 0; p < IMPORTED_DATA.roomMeshes[i].numTriangles; p++)
             {
                 int v = 0;
+                const unsigned textureIdx = IMPORTED_DATA.roomMeshes[i].triangles[p].textureIdx;
 
                 /* Three vertices per face.*/
-                sprintf(tmp, "3 %d", IMPORTED_DATA.roomMeshes[i].triangles[p].textureIdx);
+                sprintf(tmp, "3 %d", textureIdx);
                 fputs(tmp, outFile);
 
                 for (v = 0; v < 3; v++)
                 {
-                    sprintf(tmp, " %d %d %d", IMPORTED_DATA.roomMeshes[i].triangles[p].vertex[v].x,
-                                              IMPORTED_DATA.roomMeshes[i].triangles[p].vertex[v].y,
-                                              IMPORTED_DATA.roomMeshes[i].triangles[p].vertex[v].z);
+                    sprintf(tmp, " %d %d %d %f %f", IMPORTED_DATA.roomMeshes[i].triangles[p].vertex[v].x,
+                                                    IMPORTED_DATA.roomMeshes[i].triangles[p].vertex[v].y,
+                                                    IMPORTED_DATA.roomMeshes[i].triangles[p].vertex[v].z,
+                                                    IMPORTED_DATA.objectTextures[textureIdx].u[v],
+                                                    IMPORTED_DATA.objectTextures[textureIdx].v[v]);
 
                     fputs(tmp, outFile);
                 }
