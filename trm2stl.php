@@ -4,14 +4,33 @@
  * 2019 Tarpeeksi Hyvae Soft
  * trm2stl
  * 
- * Converts raw Tomb Raider 1 room mesh vertex arrays as exported by 'dig' into
+ * Converts raw Tomb Raider 1 .TRM room mesh vertex arrays as exported by 'dig' into
  * STL mesh files.
+ * 
+ * Usage:
+ *  -i path        Path to the input .TRM file.
+ *  -o path        Path to the output .STL file.
  * 
  */
 
-$faceData = explode("\n", file_get_contents("bin/output/mesh/room/1.trm"));
+$commandLine = getopt("i:o:");
 
-$outFile = fopen("bin/output/test.stl", "w");
+if (!isset($commandLine["i"]) ||
+    !file_exists($commandLine["i"]))
+{
+    echo "Invalid input path.\n";
+    exit(1);
+}
+
+if (!isset($commandLine["o"]))
+{
+    echo "Invalid output path.\n";
+    exit(1);
+}
+
+$faceData = explode("\n", file_get_contents($commandLine["i"]));
+$outFile = fopen($commandLine["o"], "w");
+
 if (!$outFile)
 {
     error_log("Failed to open the output file.");
