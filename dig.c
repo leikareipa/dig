@@ -614,7 +614,8 @@ void export(void)
                 int v = 0;
 
                 /* Four vertices per face.*/
-                fputs("4", outFile);
+                sprintf(tmp, "4 %d", IMPORTED_DATA.roomMeshes[i].quads[p].textureIdx);
+                fputs(tmp, outFile);
 
                 for (v = 0; v < 4; v++)
                 {
@@ -634,7 +635,8 @@ void export(void)
                 int v = 0;
 
                 /* Three vertices per face.*/
-                fputs("3", outFile);
+                sprintf(tmp, "3 %d", IMPORTED_DATA.roomMeshes[i].triangles[p].textureIdx);
+                fputs(tmp, outFile);
 
                 for (v = 0; v < 3; v++)
                 {
