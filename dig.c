@@ -46,6 +46,8 @@ struct tr_object_texture_s
 {
     unsigned width, height;
     unsigned hasAlpha;
+    unsigned hasWireframe;
+    unsigned ignoresDepthTest;
     uint8_t *pixelData;
 };
 
@@ -380,11 +382,15 @@ void import(void)
             struct tr_object_texture_s *const texture = &IMPORTED_DATA.objectTextures[i];
             unsigned textureAtlasIdx = 0;
             unsigned isTriangle = 0;
+            unsigned attribute = 0;
 
-            texture->hasAlpha = (uint16_t)read_value(2);
+            attribute = (uint16_t)read_value(2);
             textureAtlasIdx = (uint16_t)read_value(2);
             isTriangle = (textureAtlasIdx & 0x1);
             textureAtlasIdx = (textureAtlasIdx & 0x7fff);
+            texture->hasAlpha = ((attribute == 1) || (attribute == 4));
+            texture->ignoresDepthTest = (attribute == 4);
+            texture->hasWireframe = (attribute == 6);
 
             assert((textureAtlasIdx < IMPORTED_DATA.numTextureAtlases) && "Texture atlas index out of bounds.");
 
