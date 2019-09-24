@@ -16,6 +16,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <assert.h>
+#include <string.h>
 #include <stdio.h>
 
 /* Placeholder byte sizes of various Tomb Raider data structs.*/
@@ -40,6 +41,13 @@
 #define SIZE_TR_VERTEX 6
 #define SIZE_TR_MODEL 18
 #define SIZE_TR_BOX 20
+
+struct tr_object_texture_s
+{
+    unsigned width, height;
+    unsigned hasAlpha;
+    uint8_t *pixelData;
+};
 
 struct tr_vertex_s
 {
@@ -71,7 +79,7 @@ struct tr_room_mesh_s
 struct tr_texture_atlas_s
 {
     unsigned width, height;
-    uint8_t *pixels;
+    uint8_t *pixelData;
 };
 
 /* The data we've loaded from the level file (but not necessarily in the same
@@ -87,6 +95,9 @@ struct imported_data_s
 
     unsigned numRoomMeshes;
     struct tr_room_mesh_s *roomMeshes;
+
+    unsigned numObjectTextures;
+    struct tr_object_texture_s *objectTextures;
 };
 
 static FILE *INPUT_FILE;
@@ -154,8 +165,8 @@ void import(void)
             IMPORTED_DATA.textureAtlases[i].height = 256;
             numPixels = (IMPORTED_DATA.textureAtlases[i].width * IMPORTED_DATA.textureAtlases[i].height);
 
-            IMPORTED_DATA.textureAtlases[i].pixels = malloc(numPixels);
-            read_bytes((char*)IMPORTED_DATA.textureAtlases[i].pixels, numPixels);
+            IMPORTED_DATA.textureAtlases[i].pixelData = malloc(numPixels);
+            read_bytes((char*)IMPORTED_DATA.textureAtlases[i].pixelData, numPixels);
         }
     }
 
@@ -357,11 +368,62 @@ void import(void)
         skip_num_bytes(SIZE_TR_STATIC_MESH * numStaticMeshes);
     }
 
-    /* Read object textures.*/
+    /* Read object texture metadata.*/
     {
-        const unsigned numObjectTextures = (uint32_t)read_value(4);
-        print_file_pos(-4);printf(" Object textures: %d\n", numObjectTextures);
-        skip_num_bytes(SIZE_TR_OBJECT_TEXTURE * numObjectTextures);
+        IMPORTED_DATA.numObjectTextures = (uint32_t)read_value(4);
+        print_file_pos(-4);printf(" Object textures: %d\n", IMPORTED_DATA.numObjectTextures);
+
+        IMPORTED_DATA.objectTextures = malloc(sizeof(struct tr_object_texture_s) * IMPORTED_DATA.numObjectTextures);
+
+        for (i = 0; i < IMPORTED_DATA.numObjectTextures; i++)
+        {
+            struct tr_object_texture_s *const texture = &IMPORTED_DATA.objectTextures[i];
+            unsigned textureAtlasIdx = 0;
+            unsigned isTriangle = 0;
+
+            texture->hasAlpha = (uint16_t)read_value(2);
+            textureAtlasIdx = (uint16_t)read_value(2);
+            isTriangle = (textureAtlasIdx & 0x1);
+            textureAtlasIdx = (textureAtlasIdx & 0x7fff);
+
+            assert((textureAtlasIdx < IMPORTED_DATA.numTextureAtlases) && "Texture atlas index out of bounds.");
+
+            /* Copy the texture's data from the texture atlas.*/
+            {
+                unsigned minX = ~0u, maxX = 0, minY = ~0u, maxY = 0;
+                unsigned cornerPoints[4][2] = {0}; /* 4 uv coordinate pairs defining this texture's rectangle in the texture atlas.*/
+
+                for (p = 0; p < 4; p++)
+                {
+                    cornerPoints[p][0] = (unsigned)((uint16_t)read_value(2) / (float)(1 << 8));
+                    cornerPoints[p][1] = (unsigned)((uint16_t)read_value(2) / (float)(1 << 8));
+                }
+
+                for (p = 0; p < (isTriangle? 3 : 4); p++)
+                {
+                    if (cornerPoints[p][0] > maxX) maxX = cornerPoints[p][0];
+                    if (cornerPoints[p][0] < minX) minX = cornerPoints[p][0];
+
+                    if (cornerPoints[p][1] > maxY) maxY = cornerPoints[p][1];
+                    if (cornerPoints[p][1] < minY) minY = cornerPoints[p][1];
+                }
+                
+                texture->width = ((maxX - minX) + 1);
+                texture->height = ((maxY - minY) + 1);
+                texture->pixelData = malloc(texture->width * texture->height);
+
+                /* Copy the pixel data row by row.*/
+                for (p = 0; p < texture->height; p++)
+                {
+                    const unsigned srcIdx = (minX + (minY + p) * IMPORTED_DATA.textureAtlases[textureAtlasIdx].width);
+                    const unsigned dstIdx = (p * texture->width);
+
+                    memcpy((texture->pixelData + dstIdx),
+                           (IMPORTED_DATA.textureAtlases[textureAtlasIdx].pixelData + srcIdx),
+                           texture->width);
+                }
+            }
+        }
     }
 
     /* Read sprite textures.*/
@@ -471,7 +533,7 @@ void export(void)
 
     /* Save the level's palette.*/
     {
-        FILE *outFile = fopen("output/texture/atlas/palette.pal", "wb");
+        FILE *outFile = fopen("output/texture/palette.pal", "wb");
         assert(outFile && "Failed to open a file to save the palette into.");
 
         fwrite((char*)IMPORTED_DATA.palette, 1, 768, outFile);
@@ -483,18 +545,53 @@ void export(void)
     {
         for (i = 0; i < IMPORTED_DATA.numTextureAtlases; i++)
         {
-            FILE *outFile;
-            char textureFileName[128];
+            FILE *outFile, *metaFile;
+            char tmp[256];
             const unsigned numPixels = (IMPORTED_DATA.textureAtlases[i].width * IMPORTED_DATA.textureAtlases[i].height);
 
-            sprintf(textureFileName, "output/texture/atlas/%d.trt", i);
+            sprintf(tmp, "output/texture/atlas/%d.trt", i);
+            outFile = fopen(tmp, "wb");
 
-            outFile = fopen(textureFileName, "wb");
-            assert(outFile && "Failed to open a file to save a texture into.");
+            sprintf(tmp, "output/texture/atlas/%d.trt.mta", i);
+            metaFile = fopen(tmp, "wb");
 
-            fwrite((char*)IMPORTED_DATA.textureAtlases[i].pixels, 1, numPixels, outFile);
+            assert((outFile && metaFile) && "Failed to open a file to save a texture into.");
+
+            fwrite((char*)IMPORTED_DATA.textureAtlases[i].pixelData, 1, numPixels, outFile);
+
+            sprintf(tmp, "%d %d", IMPORTED_DATA.textureAtlases[i].width,
+                                  IMPORTED_DATA.textureAtlases[i].height);
+            fputs(tmp, metaFile);
 
             fclose(outFile);
+            fclose(metaFile);
+        }
+    }
+
+    /* Save the object textures.*/
+    {
+        for (i = 0; i < IMPORTED_DATA.numObjectTextures; i++)
+        {
+            FILE *outFile, *metaFile;
+            char tmp[128];
+            const unsigned numPixels = (IMPORTED_DATA.objectTextures[i].width * IMPORTED_DATA.objectTextures[i].height);
+
+            sprintf(tmp, "output/texture/object/%d.trt", i);
+            outFile = fopen(tmp, "wb");
+
+            sprintf(tmp, "output/texture/object/%d.trt.mta", i);
+            metaFile = fopen(tmp, "wb");
+
+            assert((outFile && metaFile) && "Failed to open a file to save a texture into.");
+
+            fwrite((char*)IMPORTED_DATA.objectTextures[i].pixelData, 1, numPixels, outFile);
+
+            sprintf(tmp, "%d %d", IMPORTED_DATA.objectTextures[i].width,
+                                  IMPORTED_DATA.objectTextures[i].height);
+            fputs(tmp, metaFile);
+
+            fclose(outFile);
+            fclose(metaFile);
         }
     }
 
