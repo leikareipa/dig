@@ -40,6 +40,8 @@
 #define SIZE_TR_CAMERA 16
 #define SIZE_TR_VERTEX 6
 #define SIZE_TR_MODEL 18
+#define SIZE_TR_FACE4 12
+#define SIZE_TR_FACE3 8
 #define SIZE_TR_BOX 20
 
 struct tr_object_texture_s
@@ -65,24 +67,67 @@ struct tr_vertex_s
 struct tr_quad_s
 {
     struct tr_vertex_s vertex[4];
-    int textureIdx;
     unsigned isDoubleSided;
+    int textureIdx;
 };
 
 struct tr_triangle_s
 {
     struct tr_vertex_s vertex[3];
-    int textureIdx;
     unsigned isDoubleSided;
+    int textureIdx;
 };
 
+/* The 3d mesh.*/
+struct tr_mesh_s
+{
+    unsigned numTexturedQuads;
+    struct tr_quad_s *texturedQuads;
+
+    unsigned numTexturedTriangles;
+    struct tr_triangle_s *texturedTriangles;
+
+    unsigned numUntexturedQuads;
+    struct tr_quad_s *untexturedQuads;
+
+    unsigned numUntexturedTriangles;
+    struct tr_triangle_s *untexturedTriangles;
+};
+
+/* Metadata about a 3d mesh.*/
+struct tr_mesh_meta_s
+{
+    /* The object's world coordinates.*/
+    int x, y, z;
+
+    /* Each object can optionally be rotated one or more times by 90 degrees
+     * horizontally.*/
+    unsigned rotation;
+
+    /* How light or dark the object is (between 0 = light and 8191 = dark).*/
+    unsigned lighting;
+
+    /* An index to the master list of room object meshes specifying this object's
+     * mesh.*/
+    unsigned meshIdx;
+};
+
+/* The 3d mesh of a room.*/
 struct tr_room_mesh_s
 {
+    /* The room's world coordinates.*/
+    int x, y, z;
+
     unsigned numQuads;
     struct tr_quad_s *quads;
 
     unsigned numTriangles;
     struct tr_triangle_s *triangles;
+
+    /* In addition to its own geometry, a room may optionally include a number
+     * of static objects.*/
+    unsigned numStaticObjects;
+    struct tr_mesh_meta_s *staticObjects;
 };
 
 struct tr_texture_atlas_s
@@ -107,6 +152,10 @@ struct imported_data_s
 
     unsigned numObjectTextures;
     struct tr_object_texture_s *objectTextures;
+
+    /* The master list of meshes.*/
+    unsigned numMeshes;
+    struct tr_mesh_s *meshes;
 };
 
 static FILE *INPUT_FILE;
@@ -162,7 +211,7 @@ void import(void)
 
     /* Read textures.*/
     {
-        IMPORTED_DATA.numTextureAtlases = (uint32_t)read_value(4);
+        IMPORTED_DATA.numTextureAtlases = read_value(4);
         IMPORTED_DATA.textureAtlases = malloc(sizeof(struct tr_texture_atlas_s) * IMPORTED_DATA.numTextureAtlases);
 
         for (i = 0; i < IMPORTED_DATA.numTextureAtlases; i++)
@@ -183,7 +232,7 @@ void import(void)
 
     /* Read rooms.*/
     {
-        IMPORTED_DATA.numRoomMeshes = (uint16_t)read_value(2);
+        IMPORTED_DATA.numRoomMeshes = read_value(2);
         print_file_pos(-2);printf(" Rooms: %d\n", IMPORTED_DATA.numRoomMeshes);
 
         IMPORTED_DATA.roomMeshes = malloc(sizeof(struct tr_room_mesh_s) * IMPORTED_DATA.numRoomMeshes);
@@ -196,20 +245,22 @@ void import(void)
             unsigned numXSectors = 0;
             int ambientIntensity = 0;
             unsigned numLights = 0;
-            unsigned numStaticMeshes = 0;
             unsigned alternateRoom = 0;
             int16_t flags = 0;
 
             print_file_pos(0);printf("   #%d\n", i);
 
             /* Room info.*/
-            skip_num_bytes(SIZE_TR_ROOM_INFO);
+            IMPORTED_DATA.roomMeshes[i].x = read_value(4);
+            IMPORTED_DATA.roomMeshes[i].z = read_value(4);
+            skip_num_bytes(4); /* Skip 'yBottom'.*/
+            skip_num_bytes(4); /* Skip 'yTop'.   */
 
             /* Room data.*/
             {
                 char *rawRoomMeshData = NULL;
 
-                numRoomDataWords = (uint32_t)read_value(4);
+                numRoomDataWords = read_value(4);
                 print_file_pos(-2);printf("     Room data size: %d\n", numRoomDataWords);
 
                 rawRoomMeshData = malloc(numRoomDataWords * 2);
@@ -229,9 +280,9 @@ void import(void)
 
                         for (p = 0; p < numVertices; p++)
                         {
-                            vertexList[p].x = *roomDataIterator++;
+                            vertexList[p].x = (*roomDataIterator++ + IMPORTED_DATA.roomMeshes[i].x);
                             vertexList[p].y = *roomDataIterator++;
-                            vertexList[p].z = *roomDataIterator++;
+                            vertexList[p].z = (*roomDataIterator++ + IMPORTED_DATA.roomMeshes[i].z);
                             vertexList[p].lighting = *roomDataIterator++;
                         }
                     }
@@ -274,34 +325,47 @@ void import(void)
                             IMPORTED_DATA.roomMeshes[i].triangles[p].textureIdx = (IMPORTED_DATA.roomMeshes[i].triangles[p].textureIdx & 0x7fff);
                         }
                     }
+
+                    free(vertexList);
                 }
+
+                free(rawRoomMeshData);
             }
 
             /* Portals.*/
-            numPortals = (uint16_t)read_value(2);
+            numPortals = read_value(2);
             print_file_pos(-2);printf("     Portals: %d\n", numPortals);
             skip_num_bytes(SIZE_TR_ROOM_PORTAL * numPortals);
 
             /* Sectors.*/
-            numZSectors = (uint16_t)read_value(2);
-            numXSectors = (uint16_t)read_value(2);
+            numZSectors = read_value(2);
+            numXSectors = read_value(2);
             print_file_pos(-4);printf("     Sectors: %d, %d\n", numZSectors, numXSectors);
             skip_num_bytes(SIZE_TR_ROOM_SECTOR * numZSectors * numXSectors);
 
             /* Lights.*/
             ambientIntensity = (int16_t)read_value(2);
-            numLights = (uint16_t)read_value(2);
+            numLights = read_value(2);
             print_file_pos(-4);printf("     Lights: %d (%d)\n", numLights, ambientIntensity);
             skip_num_bytes(SIZE_TR_ROOM_LIGHT * numLights);
 
-            /* Static meshes.*/
-            numStaticMeshes = (uint16_t)read_value(2);
-            print_file_pos(-2);printf("     Static meshes: %d\n", numStaticMeshes);
-            skip_num_bytes(SIZE_TR_ROOM_STATIC_MESH * numStaticMeshes);
+            /* Static room meshes.*/
+            IMPORTED_DATA.roomMeshes[i].numStaticObjects = read_value(2);
+            print_file_pos(-2);printf("     Static meshes: %d\n", IMPORTED_DATA.roomMeshes[i].numStaticObjects);
+            IMPORTED_DATA.roomMeshes[i].staticObjects = malloc(sizeof(struct tr_mesh_meta_s) * IMPORTED_DATA.roomMeshes[i].numStaticObjects);
+            for (p = 0; p < IMPORTED_DATA.roomMeshes[i].numStaticObjects; p++)
+            {
+                IMPORTED_DATA.roomMeshes[i].staticObjects[p].x = read_value(4);
+                IMPORTED_DATA.roomMeshes[i].staticObjects[p].y = read_value(4);
+                IMPORTED_DATA.roomMeshes[i].staticObjects[p].z = read_value(4);
+                IMPORTED_DATA.roomMeshes[i].staticObjects[p].rotation = ((read_value(2) & 0xc000) >> 14);
+                IMPORTED_DATA.roomMeshes[i].staticObjects[p].lighting = read_value(2);
+                IMPORTED_DATA.roomMeshes[i].staticObjects[p].meshIdx = read_value(2);
+            }
 
             /* Miscellaneous.*/
-            alternateRoom = (uint16_t)read_value(2);
-            flags = (uint16_t)read_value(2);
+            alternateRoom = read_value(2);
+            flags = read_value(2);
             print_file_pos(-2);printf("     Alternate room: %d\n", alternateRoom);
             print_file_pos(-2);printf("     Flags: 0x%x\n", flags);
         }
@@ -309,82 +373,202 @@ void import(void)
 
     /* Read floors.*/
     {
-        const unsigned numFloors = (uint32_t)read_value(4);
+        const unsigned numFloors = read_value(4);
         skip_num_bytes(numFloors * 2);
     }
 
     /* Read meshes.*/
     {
-        unsigned numMeshDataWords = 0;
-        unsigned numMeshPointers = 0;
+        /* The raw mesh data array.*/
+        char *meshData = NULL;
+        unsigned meshDataLength = 0;
+        int16_t *meshDataIterator = NULL; /* For iterating through and extracting values from the array.*/
 
-        numMeshDataWords = (uint32_t)read_value(4);
-        skip_num_bytes(numMeshDataWords * 2);
+        /* Offsets to the raw mesh data array of objects' mesh data.*/
+        unsigned *meshOffsets = NULL;
 
-        numMeshPointers = (uint32_t)read_value(4);
-        print_file_pos(-4);printf(" Mesh pointers: %d\n", numMeshPointers);
-        skip_num_bytes(numMeshPointers * 4);
+        meshDataLength = (read_value(4) * 2);
+        meshData = malloc(meshDataLength);
+        read_bytes(meshData, meshDataLength);
+
+        IMPORTED_DATA.numMeshes = read_value(4);
+        print_file_pos(0);printf(" Meshes: %d\n", IMPORTED_DATA.numMeshes);
+        IMPORTED_DATA.meshes = malloc(sizeof(struct tr_mesh_s) * IMPORTED_DATA.numMeshes);
+        meshOffsets = malloc(sizeof(meshOffsets) * IMPORTED_DATA.numMeshes);
+        read_bytes((char*)meshOffsets, (sizeof(uint32_t) * IMPORTED_DATA.numMeshes));
+
+        /* Extract individual meshes from the raw mesh data array.*/
+        for (i = 0; i < IMPORTED_DATA.numMeshes; i++)
+        {
+            struct tr_mesh_s *const objectMesh = &IMPORTED_DATA.meshes[i];
+            struct tr_vertex_s *vertexList = NULL;
+            int numVertices = 0;
+            int numNormals = 0;
+
+            meshDataIterator = (int16_t*)(meshData + meshOffsets[i]);
+
+            /* Skip vertex 'center'.*/
+            meshDataIterator += (SIZE_TR_VERTEX / 2);
+
+            /* Skip uint32_t collisionRadius.*/
+            meshDataIterator += (sizeof(uint32_t) / 2);
+            
+            numVertices = *meshDataIterator++;
+            vertexList = malloc(sizeof(struct tr_vertex_s) * numVertices);
+            for (p = 0; p < numVertices; p++)
+            {
+                vertexList[p].x = *meshDataIterator++;
+                vertexList[p].y = *meshDataIterator++;
+                vertexList[p].z = *meshDataIterator++;
+                vertexList[p].lighting = 0; /* Object meshes have no pre-baked lighting.*/
+            }
+
+            numNormals = *meshDataIterator++;
+            if (numNormals > 0) /* Normals*/
+            {
+                for (p = 0; p < numNormals; p++)
+                {
+                    const int x = *meshDataIterator++;
+                    const int y = *meshDataIterator++;
+                    const int z = *meshDataIterator++;
+
+                    /* Convert into a floating-point normal vector.*/
+                    const float nx = (x / 16384.0);
+                    const float ny = (y / 16384.0);
+                    const float nz = (z / 16384.0);
+
+                    /* Normals aren't exported anywhere at the moment, so let's just ignore them.*/
+                    (void)nx;
+                    (void)ny;
+                    (void)nz;
+                }
+            }
+            else /* Lights.*/
+            {
+                numNormals = abs(numNormals);
+                for (p = 0; p < numNormals; p++)
+                {
+                    meshDataIterator++;
+                }
+            }
+
+            #define LOAD_OBJECT_MESH_FACES(dstMeshArray, numFaces, numVertsPerFace)\
+                    dstMeshArray = malloc(sizeof(struct tr_quad_s) * numFaces);\
+                    for (p = 0; p < numFaces; p++)\
+                    {\
+                        unsigned v = 0;\
+                        for (v = 0; v < numVertsPerFace; v++)\
+                        {\
+                            const unsigned vertexIdx = *meshDataIterator++;\
+                            assert((vertexIdx < numVertices) && "Invalid vertex list index.");\
+                            dstMeshArray[p].vertex[v] = vertexList[vertexIdx];\
+                        }\
+                        dstMeshArray[p].textureIdx = *meshDataIterator++;\
+                    }
+
+            objectMesh->numTexturedQuads = *meshDataIterator++;
+            LOAD_OBJECT_MESH_FACES(objectMesh->texturedQuads, objectMesh->numTexturedQuads, 4);
+
+            objectMesh->numTexturedTriangles = *meshDataIterator++;
+            LOAD_OBJECT_MESH_FACES(objectMesh->texturedTriangles, objectMesh->numTexturedTriangles, 3);
+
+            objectMesh->numUntexturedQuads = *meshDataIterator++;
+            LOAD_OBJECT_MESH_FACES(objectMesh->untexturedQuads, objectMesh->numUntexturedQuads, 4);
+
+            objectMesh->numUntexturedTriangles = *meshDataIterator++;
+            LOAD_OBJECT_MESH_FACES(objectMesh->untexturedTriangles, objectMesh->numUntexturedTriangles, 3);
+
+            #undef LOAD_OBJECT_MESH_FACES
+
+            free(vertexList);
+        }
+
+        free(meshOffsets);
+        free(meshData);
     }
 
     /* Read animations.*/
     {
-        const unsigned numAnimations = (uint32_t)read_value(4);
+        const unsigned numAnimations = read_value(4);
         print_file_pos(-4);printf(" Animations: %d\n", numAnimations);
         skip_num_bytes(SIZE_TR_ANIMATION * numAnimations);
     }
 
     /* Read state changes.*/
     {
-        const unsigned numStateChanges = (uint32_t)read_value(4);
+        const unsigned numStateChanges = read_value(4);
         print_file_pos(-4);printf(" State changes: %d\n", numStateChanges);
         skip_num_bytes(SIZE_TR_STATE_CHANGE * numStateChanges);
     }
 
     /* Read animation dispatches.*/
     {
-        const unsigned numAnimationDispatches = (uint32_t)read_value(4);
+        const unsigned numAnimationDispatches = read_value(4);
         print_file_pos(-4);printf(" Animation dispatches: %d\n", numAnimationDispatches);
         skip_num_bytes(SIZE_TR_ANIM_DISPATCH * numAnimationDispatches);
     }
 
     /* Read animation commands.*/
     {
-        const unsigned numAnimationCommands = (uint32_t)read_value(4);
+        const unsigned numAnimationCommands = read_value(4);
         print_file_pos(-4);printf(" Animation commands: %d\n", numAnimationCommands);
         skip_num_bytes(SIZE_TR_ANIM_COMMANDS * numAnimationCommands);
     }
 
     /* Read mesh trees.*/
     {
-        const unsigned numMeshTrees = (uint32_t)read_value(4);
+        const unsigned numMeshTrees = read_value(4);
         print_file_pos(-4);printf(" Mesh trees: %d\n", numMeshTrees);
         skip_num_bytes(SIZE_TR_MESH_TREE_NODE * numMeshTrees);
     }
 
     /* Read frames.*/
     {
-        const unsigned numFrames = (uint32_t)read_value(4);
+        const unsigned numFrames = read_value(4);
         print_file_pos(-4);printf(" Frames: %d\n", numFrames);
         skip_num_bytes(numFrames * 2);
     }
 
     /* Read models.*/
     {
-        const unsigned numModels = (uint32_t)read_value(4);
+        const unsigned numModels = read_value(4);
         print_file_pos(-4);printf(" Models: %d\n", numModels);
         skip_num_bytes(SIZE_TR_MODEL * numModels);
     }
 
     /* Read static meshes.*/
     {
-        const unsigned numStaticMeshes = (uint32_t)read_value(4);
+        const unsigned numStaticMeshes = read_value(4);
         print_file_pos(-4);printf(" Static meshes: %d\n", numStaticMeshes);
-        skip_num_bytes(SIZE_TR_STATIC_MESH * numStaticMeshes);
+        for (i = 0; i < numStaticMeshes; i++)
+        {
+            const unsigned staticMeshId = read_value(4); /* A value identifying this static mesh.*/
+            const unsigned meshIdx = read_value(2);      /* Index to the master list of meshes (IMPORTED_DATA.meshes).*/
+            skip_num_bytes(12); /* Skip 'visibilityBox'.*/
+            skip_num_bytes(12); /* Skip 'collisionBox'. */
+            skip_num_bytes(2);  /* Skip 'flags'.        */
+
+            /* Route the master mesh index information directly to the room's static
+             * objects. Normally, the static objects have an index referring to this
+             * metadata, which then refers to the master mesh list.*/
+            for (p = 0; p < IMPORTED_DATA.numRoomMeshes; p++)
+            {
+                unsigned k = 0;
+
+                for (k = 0; k < IMPORTED_DATA.roomMeshes[p].numStaticObjects; k++)
+                {
+                    if (IMPORTED_DATA.roomMeshes[p].staticObjects[k].meshIdx == staticMeshId)
+                    {
+                        IMPORTED_DATA.roomMeshes[p].staticObjects[k].meshIdx = meshIdx;
+                    }
+                }
+            }
+        }
     }
 
     /* Read object texture metadata.*/
     {
-        IMPORTED_DATA.numObjectTextures = (uint32_t)read_value(4);
+        IMPORTED_DATA.numObjectTextures = read_value(4);
         print_file_pos(-4);printf(" Object textures: %d\n", IMPORTED_DATA.numObjectTextures);
 
         IMPORTED_DATA.objectTextures = malloc(sizeof(struct tr_object_texture_s) * IMPORTED_DATA.numObjectTextures);
@@ -396,8 +580,8 @@ void import(void)
             unsigned isTriangle = 0;
             unsigned attribute = 0;
 
-            attribute = (uint16_t)read_value(2);
-            textureAtlasIdx = (uint16_t)read_value(2);
+            attribute = read_value(2);
+            textureAtlasIdx = read_value(2);
             isTriangle = (textureAtlasIdx & 0x1);
             textureAtlasIdx = (textureAtlasIdx & 0x7fff);
             texture->hasAlpha = ((attribute == 1) || (attribute == 4));
@@ -413,8 +597,8 @@ void import(void)
 
                 for (p = 0; p < 4; p++)
                 {
-                    const unsigned x = (uint16_t)read_value(2);
-                    const unsigned y = (uint16_t)read_value(2);
+                    const unsigned x = read_value(2);
+                    const unsigned y = read_value(2);
 
                     cornerPoints[p][0] = (unsigned)((x & 0xff00) / 256.0);
                     cornerPoints[p][1] = (unsigned)((y & 0xff00) / 256.0);
@@ -452,42 +636,42 @@ void import(void)
 
     /* Read sprite textures.*/
     {
-        const unsigned numSpriteTextures = (uint32_t)read_value(4);
+        const unsigned numSpriteTextures = read_value(4);
         print_file_pos(-4);printf(" Sprite textures: %d\n", numSpriteTextures);
         skip_num_bytes(SIZE_TR_SPRITE_TEXTURE * numSpriteTextures);
     }
 
     /* Read sprite sequences.*/
     {
-        const unsigned numSpriteSequences = (uint32_t)read_value(4);
+        const unsigned numSpriteSequences = read_value(4);
         print_file_pos(-4);printf(" Sprite sequences: %d\n", numSpriteSequences);
         skip_num_bytes(SIZE_TR_SPRITE_SEQUENCE * numSpriteSequences);
     }
 
     /* Read cameras.*/
     {
-        const unsigned numCameras = (uint32_t)read_value(4);
+        const unsigned numCameras = read_value(4);
         print_file_pos(-4);printf(" Cameras: %d\n", numCameras);
         skip_num_bytes(SIZE_TR_CAMERA * numCameras);
     }
 
     /* Read sound sources.*/
     {
-        const unsigned numSoundSources = (uint32_t)read_value(4);
+        const unsigned numSoundSources = read_value(4);
         print_file_pos(-4);printf(" Sound sources: %d\n", numSoundSources);
         skip_num_bytes(SIZE_TR_SOUND_SOURCE * numSoundSources);
     }
 
-    /* Read sound boxes and overlaps.*/
+    /* Read boxes and overlaps.*/
     {
         unsigned numBoxes = 0;
         unsigned numOverlaps = 0;
         
-        numBoxes = (uint32_t)read_value(4);
+        numBoxes = read_value(4);
         print_file_pos(-4);printf(" Boxes: %d\n", numBoxes);
         skip_num_bytes(SIZE_TR_BOX * numBoxes);
 
-        numOverlaps = (uint32_t)read_value(4);
+        numOverlaps = read_value(4);
         print_file_pos(-4);printf(" Overlaps: %d\n", numBoxes);
         skip_num_bytes(numOverlaps * 2);
 
@@ -501,14 +685,14 @@ void import(void)
 
     /* Read animated textures.*/
     {
-        const unsigned numAnimatedTextures = (uint32_t)read_value(4);
+        const unsigned numAnimatedTextures = read_value(4);
         print_file_pos(-4);printf(" Animated textures: %d\n", numAnimatedTextures);
         skip_num_bytes(numAnimatedTextures * 2);
     }
 
     /* Read entities.*/
     {
-        const unsigned numEntities = (uint32_t)read_value(4);
+        const unsigned numEntities = read_value(4);
         print_file_pos(-4);printf(" Entities: %d\n", numEntities);
         skip_num_bytes(SIZE_TR_ENTITY * numEntities);
     }
@@ -532,14 +716,14 @@ void import(void)
 
     /* Read cinematic frames.*/
     {
-        const unsigned numCinematicFrames = (uint16_t)read_value(2);
+        const unsigned numCinematicFrames = read_value(2);
         print_file_pos(-2);printf(" Cinematic frames: %d\n", numCinematicFrames);
         skip_num_bytes(SIZE_TR_CINEMATIC_FRAME * numCinematicFrames);
     }
 
     /* Read demo data.*/
     {
-        const unsigned numDemoData = (uint16_t)read_value(2);
+        const unsigned numDemoData = read_value(2);
         print_file_pos(-2);printf(" Demo data: %d\n", numDemoData);
         skip_num_bytes(numDemoData);
     }
@@ -565,64 +749,110 @@ void export(void)
         fclose(outFile);
     }
 
-    /* Save the texture atlases.*/
+    /* Save textures.*/
     {
-        for (i = 0; i < IMPORTED_DATA.numTextureAtlases; i++)
+        #define SAVE_TEXTURE(path, texture)\
+                FILE *outFile, *metaFile;\
+                char filename[256];\
+                const unsigned numPixels = (texture.width * texture.height);\
+                \
+                sprintf(filename, "%s%d.trt", path, i);\
+                outFile = fopen(filename, "wb");\
+                \
+                sprintf(filename, "%s%d.trt.mta", path, i);\
+                metaFile = fopen(filename, "wb");\
+                \
+                assert((outFile && metaFile) && "Failed to open a file to save a texture into.");\
+                \
+                fwrite((char*)texture.pixelData, 1, numPixels, outFile);\
+                \
+                fprintf(metaFile, "%d %d", texture.width, texture.height);\
+                \
+                fclose(outFile);\
+                fclose(metaFile);\
+
+        /* Save the texture atlases.*/
         {
-            FILE *outFile, *metaFile;
-            char tmp[256];
-            const unsigned numPixels = (IMPORTED_DATA.textureAtlases[i].width * IMPORTED_DATA.textureAtlases[i].height);
-
-            sprintf(tmp, "output/texture/atlas/%d.trt", i);
-            outFile = fopen(tmp, "wb");
-
-            sprintf(tmp, "output/texture/atlas/%d.trt.mta", i);
-            metaFile = fopen(tmp, "wb");
-
-            assert((outFile && metaFile) && "Failed to open a file to save a texture into.");
-
-            fwrite((char*)IMPORTED_DATA.textureAtlases[i].pixelData, 1, numPixels, outFile);
-
-            sprintf(tmp, "%d %d", IMPORTED_DATA.textureAtlases[i].width,
-                                  IMPORTED_DATA.textureAtlases[i].height);
-            fputs(tmp, metaFile);
-
-            fclose(outFile);
-            fclose(metaFile);
+            for (i = 0; i < IMPORTED_DATA.numTextureAtlases; i++)
+            {
+                SAVE_TEXTURE("output/texture/atlas/", IMPORTED_DATA.textureAtlases[i]);
+            }
         }
-    }
 
-    /* Save the object textures.*/
-    {
-        for (i = 0; i < IMPORTED_DATA.numObjectTextures; i++)
+        /* Save the object textures.*/
         {
-            FILE *outFile, *metaFile;
-            char tmp[128];
-            const unsigned numPixels = (IMPORTED_DATA.objectTextures[i].width * IMPORTED_DATA.objectTextures[i].height);
-
-            sprintf(tmp, "output/texture/object/%d.trt", i);
-            outFile = fopen(tmp, "wb");
-
-            sprintf(tmp, "output/texture/object/%d.trt.mta", i);
-            metaFile = fopen(tmp, "wb");
-
-            assert((outFile && metaFile) && "Failed to open a file to save a texture into.");
-
-            fwrite((char*)IMPORTED_DATA.objectTextures[i].pixelData, 1, numPixels, outFile);
-
-            sprintf(tmp, "%d %d", IMPORTED_DATA.objectTextures[i].width,
-                                  IMPORTED_DATA.objectTextures[i].height);
-            fputs(tmp, metaFile);
-
-            fclose(outFile);
-            fclose(metaFile);
+            for (i = 0; i < IMPORTED_DATA.numObjectTextures; i++)
+            {
+                SAVE_TEXTURE("output/texture/object/", IMPORTED_DATA.objectTextures[i]);
+            }
         }
+
+        #undef SAVE_TEXTURE
     }
 
     /* Save the room mesh.*/
     {
+        #define SAVE_ROOM_FACES(numFaces, faceData, numVertsPerFace, facesAreTextured) \
+                for (j = 0; j < numFaces; j++)\
+                {\
+                    int v = 0;\
+                    \
+                    sprintf(tmp, "%d %d", numVertsPerFace, (facesAreTextured? faceData[j].textureIdx : -(faceData[j].textureIdx & 0xff)));\
+                    fputs(tmp, outFile);\
+                    \
+                    for (v = 0; v < numVertsPerFace; v++)\
+                    {\
+                        sprintf(tmp, " %d %d %d %f %f", faceData[j].vertex[v].x,\
+                                                        faceData[j].vertex[v].y,\
+                                                        faceData[j].vertex[v].z,\
+                                                        IMPORTED_DATA.objectTextures[faceData[j].textureIdx].u[v],\
+                                                        IMPORTED_DATA.objectTextures[faceData[j].textureIdx].v[v]);\
+                        \
+                        fputs(tmp, outFile);\
+                    }\
+                    \
+                    fputs("\n", outFile);\
+                }\
+
+        #define SAVE_ROOM_OBJECT_FACES(numFaces, faceData, metaData, numVertsPerFace, facesAreTextured) \
+                for (j = 0; j < numFaces; j++)\
+                {\
+                    int v = 0;\
+                    \
+                    sprintf(tmp, "%d %d", numVertsPerFace, (facesAreTextured? faceData[j].textureIdx : -(faceData[j].textureIdx & 0xff)));\
+                    fputs(tmp, outFile);\
+                    \
+                    for (v = 0; v < numVertsPerFace; v++)\
+                    {\
+                        int r = 0;\
+                        \
+                        int x = faceData[j].vertex[v].x;\
+                        int y = faceData[j].vertex[v].y;\
+                        int z = faceData[j].vertex[v].z;\
+                        \
+                        /* Rotate the vertex.*/\
+                        for (r = 0; r < metaData->rotation; r++)\
+                        {\
+                            int tmp = x;\
+                            x = z;\
+                            z = -tmp;\
+                        }\
+                        \
+                        sprintf(tmp, " %d %d %d %f %f", (x + metaData->x),\
+                                                        (y + metaData->y),\
+                                                        (z + metaData->z),\
+                                                        IMPORTED_DATA.objectTextures[faceData[j].textureIdx].u[v],\
+                                                        IMPORTED_DATA.objectTextures[faceData[j].textureIdx].v[v]);\
+                        \
+                        fputs(tmp, outFile);\
+                    }\
+                    \
+                    fputs("\n", outFile);\
+                }\
+                
         for (i = 0; i < IMPORTED_DATA.numRoomMeshes; i++)
         {
+            unsigned j = 0;
             FILE *outFile;
             char tmp[256];
             char meshFileName[256];
@@ -632,54 +862,25 @@ void export(void)
             outFile = fopen(meshFileName, "wb");
             assert(outFile && "Failed to open a file to save a mesh into.");
 
-            /* Save the quads.*/
-            for (p = 0; p < IMPORTED_DATA.roomMeshes[i].numQuads; p++)
+            /* Save the room's mesh.*/
+            SAVE_ROOM_FACES(IMPORTED_DATA.roomMeshes[i].numQuads, IMPORTED_DATA.roomMeshes[i].quads, 4, 1);
+            SAVE_ROOM_FACES(IMPORTED_DATA.roomMeshes[i].numTriangles, IMPORTED_DATA.roomMeshes[i].triangles, 3, 1);
+
+            /* Save the room's static objects' meshes.*/
+            for (p = 0; p < IMPORTED_DATA.roomMeshes[i].numStaticObjects; p++)
             {
-                int v = 0;
-                const unsigned textureIdx = IMPORTED_DATA.roomMeshes[i].quads[p].textureIdx;
+                const struct tr_mesh_meta_s *const objectMeta = &IMPORTED_DATA.roomMeshes[i].staticObjects[p];
+                const struct tr_mesh_s *const object = &IMPORTED_DATA.meshes[objectMeta->meshIdx];
 
-                /* Four vertices per face.*/
-                sprintf(tmp, "4 %d", textureIdx);
-                fputs(tmp, outFile);
-
-                for (v = 0; v < 4; v++)
-                {
-                    sprintf(tmp, " %d %d %d %f %f", IMPORTED_DATA.roomMeshes[i].quads[p].vertex[v].x,
-                                                    IMPORTED_DATA.roomMeshes[i].quads[p].vertex[v].y,
-                                                    IMPORTED_DATA.roomMeshes[i].quads[p].vertex[v].z,
-                                                    IMPORTED_DATA.objectTextures[textureIdx].u[v],
-                                                    IMPORTED_DATA.objectTextures[textureIdx].v[v]);
-
-                    fputs(tmp, outFile);
-                }
-
-                fputs("\n", outFile);
-            }
-
-            /* Save the triangles.*/
-            for (p = 0; p < IMPORTED_DATA.roomMeshes[i].numTriangles; p++)
-            {
-                int v = 0;
-                const unsigned textureIdx = IMPORTED_DATA.roomMeshes[i].triangles[p].textureIdx;
-
-                /* Three vertices per face.*/
-                sprintf(tmp, "3 %d", textureIdx);
-                fputs(tmp, outFile);
-
-                for (v = 0; v < 3; v++)
-                {
-                    sprintf(tmp, " %d %d %d %f %f", IMPORTED_DATA.roomMeshes[i].triangles[p].vertex[v].x,
-                                                    IMPORTED_DATA.roomMeshes[i].triangles[p].vertex[v].y,
-                                                    IMPORTED_DATA.roomMeshes[i].triangles[p].vertex[v].z,
-                                                    IMPORTED_DATA.objectTextures[textureIdx].u[v],
-                                                    IMPORTED_DATA.objectTextures[textureIdx].v[v]);
-
-                    fputs(tmp, outFile);
-                }
-
-                fputs("\n", outFile);
+                SAVE_ROOM_OBJECT_FACES(object->numTexturedQuads, object->texturedQuads, objectMeta, 4, 1);
+                SAVE_ROOM_OBJECT_FACES(object->numTexturedTriangles, object->texturedTriangles, objectMeta, 3, 1);
+                SAVE_ROOM_OBJECT_FACES(object->numUntexturedQuads, object->untexturedQuads, objectMeta, 4, 0);
+                SAVE_ROOM_OBJECT_FACES(object->numUntexturedTriangles, object->untexturedTriangles, objectMeta, 3, 0);
             }
         }
+
+        #undef SAVE_ROOM_FACES
+        #undef SAVE_ROOM_OBJECT_FACES
     }
 
     return;
@@ -687,7 +888,7 @@ void export(void)
 
 int main(void)
 {
-    INPUT_FILE = fopen("level/1.phd", "rb");
+    INPUT_FILE = fopen("level/home.phd", "rb");
 
     assert(INPUT_FILE && "Failed to open the level file for reading.");
 

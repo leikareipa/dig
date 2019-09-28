@@ -11,11 +11,12 @@
  *  -i path        Path to the input .TRM file.
  *  -o path        Path to the output .OBJ file.
  *  -m path        Path to the output .MTL file.
+ *  -p path        Path to the level's .PAL palette file.
  *  -t path        Path to a directory containing Tomb Raider's object textures as .PNG files.
  * 
  */
 
-$commandLine = getopt("i:o:t:m:");
+$commandLine = getopt("i:o:t:m:p:");
 
 if (!isset($commandLine["i"]) ||
     !file_exists($commandLine["i"]))
@@ -42,12 +43,20 @@ if (!isset($commandLine["t"]))
     exit(1);
 }
 
+if (!isset($commandLine["p"]) ||
+    !file_exists($commandLine["p"]))
+{
+    echo "Invalid palette path.\n";
+    exit(1);
+}
+
 if ($commandLine["t"][strlen($commandLine["t"])-1] != "/")
 {
     $commandLine["t"] .= "/";
 }
 
 $faceData = explode("\n", file_get_contents($commandLine["i"]));
+$palette = array_values(unpack("C*", file_get_contents("{$commandLine["p"]}")));
 $objFile = fopen($commandLine["o"], "w");
 $mtlFile = fopen($commandLine["m"], "w");
 
@@ -78,19 +87,44 @@ foreach ($faceData as $face)
     }
 
     $textureIdx = $values[1];
-    if (isset($knownMaterials[$textureIdx]))
+
+    if ($textureIdx >= 0)
     {
-        continue;
+        if (isset($knownMaterials[$textureIdx]))
+        {
+            continue;
+        }
+
+        fputs($mtlFile, "newmtl object_texture_{$textureIdx}\n");
+        fputs($mtlFile, "Kd 1 1 1\n");
+        fputs($mtlFile, "Ks 0 0 0\n");
+        fputs($mtlFile, "Ns 0\n");
+        fputs($mtlFile, "illum 0\n");
+        fputs($mtlFile, "map_Kd {$commandLine["t"]}{$textureIdx}.png\n");
+
+        $knownMaterials[$textureIdx] = true;
     }
+    else
+    {
+        $textureIdx = abs($textureIdx);
+        $paletteIdx = ($textureIdx * 3);
 
-    fputs($mtlFile, "newmtl object_texture_{$textureIdx}\n");
-    fputs($mtlFile, "Kd 1 1 1\n");
-    fputs($mtlFile, "Ks 0 0 0\n");
-    fputs($mtlFile, "Ns 0\n");
-    fputs($mtlFile, "illum 0\n");
-    fputs($mtlFile, "map_Kd {$commandLine["t"]}{$textureIdx}.png\n");
+        if (isset($knownMaterials["color_" . $textureIdx]))
+        {
+            continue;
+        }
 
-    $knownMaterials[$textureIdx] = true;
+        fputs($mtlFile, "newmtl object_color_{$textureIdx}\n");
+        fprintf($mtlFile, "Kd %f %f %f\n", ($palette[$paletteIdx+0] / 255.0),
+                                           ($palette[$paletteIdx+1] / 255.0),
+                                           ($palette[$paletteIdx+2] / 255.0));
+        fputs($mtlFile, "Ks 0 0 0\n");
+        fputs($mtlFile, "Ns 0\n");
+        fputs($mtlFile, "illum 0\n");
+
+        $knownMaterials["color_" . $textureIdx] = true;
+    }
+    
 
     /* Separate the next material block from the current one.*/
     fputs($mtlFile, "\n");
@@ -180,7 +214,14 @@ foreach ($faceData as $face)
     $textureIdx = $values[1];
     $components = array_slice($values, 2);
 
-    fputs($objFile, "usemtl object_texture_{$textureIdx}\n");
+    if ($textureIdx >= 0)
+    {
+        fputs($objFile, "usemtl object_texture_{$textureIdx}\n");
+    }
+    else
+    {
+        fprintf($objFile, "usemtl object_color_%d\n", abs($textureIdx));
+    }
     fputs($objFile, "f");
     for ($p = 0; $p < $numVerts; $p++)
     {
