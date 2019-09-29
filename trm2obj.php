@@ -18,217 +18,367 @@
 
 $commandLine = getopt("i:o:t:m:p:");
 
-if (!isset($commandLine["i"]) ||
-    !file_exists($commandLine["i"]))
+// Verify command-line arguments.
 {
-    echo "Invalid input path.\n";
-    exit(1);
-}
-
-if (!isset($commandLine["o"]))
-{
-    echo "Invalid .OBJ output path.\n";
-    exit(1);
-}
-
-if (!isset($commandLine["m"]))
-{
-    echo "Invalid .MTL output path.\n";
-    exit(1);
-}
-
-if (!isset($commandLine["t"]))
-{
-    echo "Invalid texture path.\n";
-    exit(1);
-}
-
-if (!isset($commandLine["p"]) ||
-    !file_exists($commandLine["p"]))
-{
-    echo "Invalid palette path.\n";
-    exit(1);
-}
-
-if ($commandLine["t"][strlen($commandLine["t"])-1] != "/")
-{
-    $commandLine["t"] .= "/";
-}
-
-$faceData = explode("\n", file_get_contents($commandLine["i"]));
-$palette = array_values(unpack("C*", file_get_contents("{$commandLine["p"]}")));
-$objFile = fopen($commandLine["o"], "w");
-$mtlFile = fopen($commandLine["m"], "w");
-
-if (!$objFile ||
-    !$mtlFile)
-{
-    error_log("Failed to open the output file.");
-    exit(1);
-}
-
-fputs($objFile, "# A conversion produced by dig/trm2obj of a Tomb Raider 1 mesh.\n");
-fputs($objFile, "mtllib " . basename($commandLine["m"]) . "\n");
-fputs($objFile, "o tr_mesh\n");
-
-/* Export the materials.*/
-$knownMaterials = [];
-foreach ($faceData as $face)
-{
-    if (empty($face))
+    if (!isset($commandLine["i"]) ||
+        !file_exists($commandLine["i"]))
     {
-        continue;
+        echo "Invalid input path.\n";
+        exit(1);
     }
 
-    $values = explode(" ", $face);
-    if (!count($values))
+    if (!isset($commandLine["o"]))
     {
-        continue;
+        echo "Invalid .OBJ output path.\n";
+        exit(1);
     }
 
-    $textureIdx = $values[1];
-
-    if ($textureIdx >= 0)
+    if (!isset($commandLine["m"]))
     {
-        if (isset($knownMaterials[$textureIdx]))
+        echo "Invalid .MTL output path.\n";
+        exit(1);
+    }
+
+    if (!isset($commandLine["t"]))
+    {
+        echo "Invalid texture path.\n";
+        exit(1);
+    }
+
+    if (!isset($commandLine["p"]) ||
+        !file_exists($commandLine["p"]))
+    {
+        echo "Invalid palette path.\n";
+        exit(1);
+    }
+
+    if ($commandLine["t"][strlen($commandLine["t"])-1] != "/")
+    {
+        $commandLine["t"] .= "/";
+    }
+}
+
+// Obtain input data.
+{
+    $faceData = explode("\n", file_get_contents($commandLine["i"]));
+    $palette = array_values(unpack("C*", file_get_contents("{$commandLine["p"]}")));
+    $objFile = fopen($commandLine["o"], "w");
+    $mtlFile = fopen($commandLine["m"], "w");
+
+    if (!$objFile ||
+        !$mtlFile)
+    {
+        error_log("Failed to open the output file.");
+        exit(1);
+    }
+}
+
+// Export.
+{
+    fputs($objFile, "# A conversion produced by dig/trm2obj of a Tomb Raider 1 mesh.\n");
+    fputs($objFile, "mtllib " . basename($commandLine["m"]) . "\n");
+    fputs($objFile, "o tr_mesh\n");
+
+    export_materials($mtlFile, $faceData, $palette, $commandLine["t"]);
+    $uniqueVertexList = export_vertex_list($objFile, $faceData);
+    $uniqueUVList = export_uv_list($objFile, $faceData);
+    export_faces($objFile, $faceData, $uniqueVertexList, $uniqueUVList);
+}
+
+exit(0);
+
+function export_materials($outputFile, array $faces, array $palette, string $texturePath)
+{
+    // A list of the materials we've already exported. Used to make sure we don't
+    // export the same material twice.
+    $knownMaterials = [];
+
+    foreach ($faces as $face)
+    {
+        if (empty($face))
         {
             continue;
         }
 
-        fputs($mtlFile, "newmtl object_texture_{$textureIdx}\n");
-        fputs($mtlFile, "Kd 1 1 1\n");
-        fputs($mtlFile, "Ks 0 0 0\n");
-        fputs($mtlFile, "Ns 0\n");
-        fputs($mtlFile, "illum 0\n");
-        fputs($mtlFile, "map_Kd {$commandLine["t"]}{$textureIdx}.png\n");
-
-        $knownMaterials[$textureIdx] = true;
-    }
-    else
-    {
-        $textureIdx = abs($textureIdx);
-        $paletteIdx = ($textureIdx * 3);
-
-        if (isset($knownMaterials["color_" . $textureIdx]))
+        $values = explode(" ", $face);
+        if (!count($values))
         {
             continue;
         }
 
-        fputs($mtlFile, "newmtl object_color_{$textureIdx}\n");
-        fprintf($mtlFile, "Kd %f %f %f\n", ($palette[$paletteIdx+0] / 255.0),
-                                           ($palette[$paletteIdx+1] / 255.0),
-                                           ($palette[$paletteIdx+2] / 255.0));
-        fputs($mtlFile, "Ks 0 0 0\n");
-        fputs($mtlFile, "Ns 0\n");
-        fputs($mtlFile, "illum 0\n");
+        $textureIdx = $values[1];
 
-        $knownMaterials["color_" . $textureIdx] = true;
-    }
-    
+        if ($textureIdx >= 0)
+        {
+            if (isset($knownMaterials[$textureIdx]))
+            {
+                continue;
+            }
 
-    /* Separate the next material block from the current one.*/
-    fputs($mtlFile, "\n");
-}
+            fputs($outputFile, "newmtl object_texture_{$textureIdx}\n");
+            fputs($outputFile, "Kd 1 1 1\n");
+            fputs($outputFile, "Ks 0 0 0\n");
+            fputs($outputFile, "Ns 0\n");
+            fputs($outputFile, "illum 0\n");
+            fputs($outputFile, "map_Kd {$texturePath}{$textureIdx}.png\n");
 
-/* Export the vertices.*/
-foreach ($faceData as $face)
-{
-    if (empty($face))
-    {
-        continue;
-    }
+            $knownMaterials[$textureIdx] = true;
+        }
+        else
+        {
+            $textureIdx = abs($textureIdx);
+            $paletteIdx = ($textureIdx * 3);
 
-    $values = explode(" ", $face);
-    if (!count($values))
-    {
-        continue;
-    }
+            if (isset($knownMaterials["color_" . $textureIdx]))
+            {
+                continue;
+            }
 
-    $numVerts = $values[0];
-    if (!$numVerts)
-    {
-        continue;
-    }
-    
-    $textureIdx = $values[1];
-    $components = array_slice($values, 2);
+            fputs($outputFile, "newmtl object_color_{$textureIdx}\n");
+            fprintf($outputFile, "Kd %f %f %f\n", ($palette[$paletteIdx+0] / 255.0),
+                                                  ($palette[$paletteIdx+1] / 255.0),
+                                                  ($palette[$paletteIdx+2] / 255.0));
+            fputs($outputFile, "Ks 0 0 0\n");
+            fputs($outputFile, "Ns 0\n");
+            fputs($outputFile, "illum 0\n");
 
-    for ($p = 0; $p < $numVerts; $p++)
-    {
-        // Each vertex has 5 values: x, y, z, u, v.
-        fputs($objFile, "v {$components[$p*5+0]} {$components[$p*5+1]} {$components[$p*5+2]}\n");
+            $knownMaterials["color_" . $textureIdx] = true;
+        }
+        
+        /* Separate the next material block from the current one.*/
+        fputs($outputFile, "\n");
     }
 }
 
-/* Export the uv coordinates.*/
-foreach ($faceData as $face)
+// Saves a list of the given faces' unique vertices into the output file, and returns
+// the list.
+function export_vertex_list($outputFile, $faces) : UniqueArrayList
 {
-    if (empty($face))
+    // Create a list of unique vertices.
+    $vertexList = new UniqueArrayList();
+    foreach ($faces as $face)
     {
-        continue;
+        if (empty($face))
+        {
+            continue;
+        }
+
+        $values = explode(" ", $face);
+        if (!count($values))
+        {
+            continue;
+        }
+
+        $numVerts = $values[0];
+        if (!$numVerts)
+        {
+            continue;
+        }
+        
+        $components = array_slice($values, 2);
+
+        for ($p = 0; $p < $numVerts; $p++)
+        {
+            // Each vertex has 5 values: x, y, z, u, v.
+            $x = $components[$p*5+0];
+            $y = $components[$p*5+1];
+            $z = $components[$p*5+2];
+
+            $vertexList->add(["x"=>$x, "y"=>$y, "z"=>$z]);
+        }
     }
 
-    $values = explode(" ", $face);
-    if (!count($values))
+    // Export the unique list of vertices.
+    for ($i = 0; $i < $vertexList->count(); $i++)
     {
-        continue;
+        $vertex = $vertexList->array_at($i);
+        fputs($outputFile, "v {$vertex["x"]} {$vertex["y"]} {$vertex["z"]}\n");
     }
 
-    $numVerts = $values[0];
-    if (!$numVerts)
-    {
-        continue;
-    }
-    
-    $textureIdx = $values[1];
-    $components = array_slice($values, 2);
-
-    for ($p = 0; $p < $numVerts; $p++)
-    {
-        // Each vertex has 5 values: x, y, z, u, v.
-        fputs($objFile, "vt {$components[$p*5+3]} {$components[$p*5+4]}\n");
-    }
+    return $vertexList;
 }
 
-/* Export the faces.*/
-$idx = 1;
-foreach ($faceData as $face)
+function export_uv_list($outputFile, array $faces) : UniqueArrayList
 {
-    if (empty($face))
+    // Create a list of unique UV coordinates.
+    $uvList = new UniqueArrayList();
+    foreach ($faces as $face)
     {
-        continue;
+        if (empty($face))
+        {
+            continue;
+        }
+
+        $values = explode(" ", $face);
+        if (!count($values))
+        {
+            continue;
+        }
+
+        $numVerts = $values[0];
+        if (!$numVerts)
+        {
+            continue;
+        }
+        
+        $textureIdx = $values[1];
+        $components = array_slice($values, 2);
+
+        for ($p = 0; $p < $numVerts; $p++)
+        {
+            // Each vertex has 5 values: x, y, z, u, v.
+            $u = $components[$p*5+3];
+            $v = $components[$p*5+4];
+
+            $uvList->add(["u"=>$u, "v"=>$v]);
+        }
     }
 
-    $values = explode(" ", $face);
-    if (!count($values))
+    /* Export the list of UV coordinates.*/
+    for ($i = 0; $i < $uvList->count(); $i++)
     {
-        continue;
+        $uv = $uvList->array_at($i);
+        fputs($outputFile, "vt {$uv["u"]} {$uv["v"]}\n");
     }
 
-    $numVerts = $values[0];
-    if (!$numVerts)
+    return $uvList;
+}
+
+function export_faces($outputFile, array $faces, UniqueArrayList $uniqueVertexList, UniqueArrayList $uniqueUVList)
+{
+    /* Export the faces.*/
+    foreach ($faces as $face)
     {
-        continue;
+        if (empty($face))
+        {
+            continue;
+        }
+
+        $values = explode(" ", $face);
+        if (!count($values))
+        {
+            continue;
+        }
+
+        $numVerts = $values[0];
+        if (!$numVerts)
+        {
+            continue;
+        }
+
+        $textureIdx = $values[1];
+        $components = array_slice($values, 2);
+
+        if ($textureIdx >= 0)
+        {
+            fputs($outputFile, "usemtl object_texture_{$textureIdx}\n");
+        }
+        else
+        {
+            fprintf($outputFile, "usemtl object_color_%d\n", abs($textureIdx));
+        }
+        fputs($outputFile, "f");
+        for ($p = 0; $p < $numVerts; $p++)
+        {
+            $x = $components[$p*5+0];
+            $y = $components[$p*5+1];
+            $z = $components[$p*5+2];
+            $u = $components[$p*5+3];
+            $v = $components[$p*5+4];
+
+            $vertexListIdx = ($uniqueVertexList->array_key(["x"=>$x, "y"=>$y, "z"=>$z]) + 1);
+            $uvListIdx = ($uniqueUVList->array_key(["u"=>$u, "v"=>$v]) + 1);
+
+            fputs($outputFile, " {$vertexListIdx}/{$uvListIdx}");
+        }
+        fputs($outputFile, "\n");
     }
 
-    $textureIdx = $values[1];
-    $components = array_slice($values, 2);
+    return;
+}
 
-    if ($textureIdx >= 0)
+// Maintains a list of arrays such that:
+//
+//   - Each array has the same number of components
+//   - No two arrays have the same component values
+//
+class UniqueArrayList
+{
+    private $list;
+
+    function __construct()
     {
-        fputs($objFile, "usemtl object_texture_{$textureIdx}\n");
+        $this->list = [];
     }
-    else
+
+    function add(array $componentArray)
     {
-        fprintf($objFile, "usemtl object_color_%d\n", abs($textureIdx));
+        if (!$this->item_exists_in_list($componentArray))
+        {
+            $this->list[] = $componentArray;
+        }
     }
-    fputs($objFile, "f");
-    for ($p = 0; $p < $numVerts; $p++)
+
+    // Returns the component values of the item in the given index position in the list;
+    // or false if the index is out of bounds.
+    function array_at(int $idx)
     {
-        fputs($objFile, " {$idx}/{$idx}");
-        $idx++;
+        if (($idx < 0) ||
+            ($idx >= $this->count()))
+        {
+            return false;
+        }
+
+        return $this->list[$idx];
     }
-    fputs($objFile, "\n");
+
+    function count() : int
+    {
+        return count($this->list);
+    }
+
+    // Returns the key in the list of the first element whose component values match the
+    // given ones; or false if no such match is found.
+    function array_key(array $componentArray)
+    {
+        foreach ($this->list as $listItemKey=>$listItem)
+        {
+            if (count($componentArray) !== count($listItem))
+            {
+                error_log("UniqueArrayList: Mismatching component count.");
+                return false;
+            }
+
+            $foundAll = true;
+            foreach ($componentArray as $componentKey=>$component)
+            {
+                if (!isset($listItem[$componentKey]))
+                {
+                    error_log("UniqueArrayList: Incompatible components.");
+                    return false;
+                }
+
+                if ($listItem[$componentKey] != $component)
+                {
+                    $foundAll = false;
+                    break;
+                }
+            }
+
+            if ($foundAll)
+            {
+                return $listItemKey;
+            }
+        }
+
+        return false;
+    }
+
+    // Returns true if a list item by the given components exists in the list.
+    function item_exists_in_list(array $componentArray) : bool
+    {
+        return ($this->array_key($componentArray) !== false);
+    }
 }
 
 ?>
