@@ -1,15 +1,30 @@
 /*
  * 2019 Tarpeeksi Hyvae Soft
- * dig
  * 
- * Provides (partial) access to Tomb Raider 1's .PHD level files.
+ * Software: dig
+ * 
+ * 
+ * Exports mesh and texture data from a given Tomb Raider 1 PHD file.
+ * 
+ * You should first create the following directory structure under where you
+ * run the program:
+ * 
+ *   dig's directory
+ *   |
+ *   +- output
+ *      |
+ *      +- mesh
+ *      |  |
+ *      |  +- room
+ *      |
+ *      +- texture
+ *         |
+ *         +- atlas
+ *         |
+ *         +- object
  * 
  * Based on the third-party file format documentation available at
  * https://trwiki.earvillage.net/doku.php?id=trs:file_formats.
- * 
- * Note that this project is a simple tool to scratch a personal itch. For
- * purposes of modding and the like, there surely exist various other more
- * relevant solutions.
  *
  */
 
@@ -201,7 +216,7 @@ void print_file_pos(const int offset)
     return;
 }
 
-void import(void)
+void import_data_from_input_file(void)
 {
     int i = 0, p = 0;
 
@@ -735,14 +750,14 @@ void import(void)
     return;
 }
 
-void export(void)
+void export_imported_data(void)
 {
     int i = 0, p = 0;
 
     /* Save the level's palette.*/
     {
         FILE *outFile = fopen("output/texture/palette.pal", "wb");
-        assert(outFile && "Failed to open a file to save the palette into.");
+        assert(outFile && "Failed to open an output file for exporting the palette.");
 
         fwrite((char*)IMPORTED_DATA.palette, 1, 768, outFile);
 
@@ -762,7 +777,7 @@ void export(void)
                 sprintf(filename, "%s%d.trt.mta", path, i);\
                 metaFile = fopen(filename, "wb");\
                 \
-                assert((outFile && metaFile) && "Failed to open a file to save a texture into.");\
+                assert((outFile && metaFile) && "Failed to open an output file to export a texture into.");\
                 \
                 fwrite((char*)texture.pixelData, 1, numPixels, outFile);\
                 \
@@ -790,7 +805,7 @@ void export(void)
         #undef SAVE_TEXTURE
     }
 
-    /* Save the room mesh.*/
+    /* Save the room meshes.*/
     {
         #define SAVE_ROOM_FACES(numFaces, faceData, numVertsPerFace, facesAreTextured) \
                 for (j = 0; j < numFaces; j++)\
@@ -860,7 +875,7 @@ void export(void)
             sprintf(meshFileName, "output/mesh/room/%d.trm", i);
 
             outFile = fopen(meshFileName, "wb");
-            assert(outFile && "Failed to open a file to save a mesh into.");
+            assert(outFile && "Failed to open an output file to export a mesh into.");
 
             /* Save the room's mesh.*/
             SAVE_ROOM_FACES(IMPORTED_DATA.roomMeshes[i].numQuads, IMPORTED_DATA.roomMeshes[i].quads, 4, 1);
@@ -886,14 +901,19 @@ void export(void)
     return;
 }
 
-int main(void)
+int main(int argc, char *argv[])
 {
-    INPUT_FILE = fopen("level/home.phd", "rb");
+    if (argc != 2)
+    {
+        printf("Usage: %s <PHD filename>\n", argv[0]);
+        return 1;
+    }
+    
+    INPUT_FILE = fopen(argv[1], "rb");
+    assert(INPUT_FILE && "Could not open the PHD file.");
 
-    assert(INPUT_FILE && "Failed to open the level file for reading.");
-
-    import();
-    export();
+    import_data_from_input_file();
+    export_imported_data();
 
     return 0;
 }
