@@ -2,17 +2,17 @@
 
 /*
  * 2019 Tarpeeksi Hyvae Soft
- * trm2obj
  * 
- * Converts raw Tomb Raider 1 .TRM meshes as exported by 'dig' into .OBJ mesh
- * files.
+ * Software: trt2png
+ * 
+ * Converts dig's .TRM texture files into .OBJ mesh files.
  * 
  * Usage:
- *  -i path        Path to the input .TRM file.
- *  -o path        Path to the output .OBJ file.
- *  -m path        Path to the output .MTL file.
- *  -p path        Path to the level's .PAL palette file.
- *  -t path        Path to a directory containing Tomb Raider's object textures as .PNG files.
+ *  -i file         Path and filename of the input .TRM file.
+ *  -o file         Path and filename of the output .OBJ file.
+ *  -m file         Path and filename of the output .MTL file.
+ *  -p file         Path and filename of the level's .PAL palette file.
+ *  -t directory    Path to a directory containing Tomb Raider's object textures as .PNG files.
  * 
  */
 
@@ -41,8 +41,11 @@ $commandLine = getopt("i:o:t:m:p:");
 
     if (!isset($commandLine["t"]))
     {
-        echo "Invalid texture path.\n";
-        exit(1);
+        $commandLine["t"] = "";
+    }
+    else if ($commandLine["t"][strlen($commandLine["t"])-1] != "/")
+    {
+        $commandLine["t"] .= "/";
     }
 
     if (!isset($commandLine["p"]) ||
@@ -50,11 +53,6 @@ $commandLine = getopt("i:o:t:m:p:");
     {
         echo "Invalid palette path.\n";
         exit(1);
-    }
-
-    if ($commandLine["t"][strlen($commandLine["t"])-1] != "/")
-    {
-        $commandLine["t"] .= "/";
     }
 }
 
